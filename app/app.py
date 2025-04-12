@@ -3,7 +3,7 @@ import pandas as pd
 import joblib
 
 # Load model and expected feature columns
-model = joblib.load('../notebook/best_model_Bagging_Regressor.pkl')
+model = joblib.load('../notebook/Random_Forest_model.pkl')
 expected_columns = joblib.load('../notebook/model_features.pkl')
 
 # Dynamically extract crops and areas
@@ -44,5 +44,6 @@ input_df = input_df.reindex(columns=expected_columns, fill_value=0)
 
 # Prediction
 if st.button("Predict Yield"):
+    print(input_df)
     prediction = model.predict(input_df)
     st.success(f"🌱 Predicted Yield: {prediction[0]:.2f}")
