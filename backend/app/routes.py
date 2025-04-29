@@ -1,4 +1,5 @@
 import bcrypt
+
 from flask import Blueprint, request, jsonify
 
 
@@ -10,6 +11,8 @@ import joblib
 import pandas as pd
 import os
 from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
+from flask import request
 
 
 # from .__init__ import create_app
@@ -30,6 +33,52 @@ areas = sorted([col[len(area_prefix):] for col in expected_columns if col.starts
 
 
 routes = Blueprint('routes', __name__)
+
+"""
+Decorator function to enforce JWT token authentication for protected routes.
+
+This decorator checks for the presence of a valid JWT token in the `Authorization` 
+header of the incoming request. If the token is missing, expired, or invalid, 
+it returns an appropriate error response. If the token is valid, it retrieves 
+the current user from the database and passes it as the first argument to the 
+decorated function.
+
+Args:
+    f (function): The function to be decorated.
+
+Returns:
+    function: The decorated function with token authentication applied.
+
+Raises:
+    401 Unauthorized: If the token is missing, expired, or invalid.
+
+Example:
+    @token_required
+    def protected_route(current_user):
+        return jsonify({'message': 'This is a protected route'})
+"""
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        if 'Authorization' in request.headers:
+            bearer = request.headers['Authorization']
+            token = bearer.split()[1] if ' ' in bearer else bearer
+
+        if not token:
+            return jsonify({'error': 'Token is missing'}), 401
+
+        try:
+            data = jwt.decode(token, 'AAiT CropYieldPrediction Project', algorithms=['HS256'])
+            current_user = User.query.get(data['user_id'])
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token'}), 401
+
+        return f(current_user, *args, **kwargs)
+    return decorated
+
 
  # Register Endpoint
 @routes.route('/register', methods=['POST'])
@@ -118,3 +167,51 @@ def predict():
     # Make prediction
     prediction = model.predict(input_df)
     return jsonify({'predicted_yield': prediction[0]})
+
+@routes.route('/profile', methods=['GET'])
+@token_required
+def profile(current_user):
+    return jsonify({'user': current_user.to_dict()}), 200
+
+@routes.route('/update_profile', methods=['PUT'])
+@token_required
+def update_profile(current_user):
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    if 'full_name' in data:
+        current_user.full_name = data['full_name']
+
+    if 'phone_number' in data:
+        current_user.phone_number = data['phone_number']
+
+    db.session.commit()
+
+    return jsonify({'message': 'Profile updated successfully', 'user': current_user.to_dict()}), 200
+
+
+
+
+@routes.route('/update_password', methods=['PUT'])
+@token_required 
+def password_update(current_user):
+    data = request.get_json()
+
+    if not all(k in data for k in ('old_password', 'new_password')):
+        return jsonify({'error': 'Missing fields'}), 400
+
+    if not bcrypt.checkpw(data['old_password'].encode('utf-8'), current_user.password.encode('utf-8')):
+        return jsonify({'error': 'Old password is incorrect'}), 401
+
+    current_user.password = bcrypt.hashpw(data['new_password'].encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    db.session.commit()
+
+    return jsonify({'message': 'Password updated successfully'}), 200
+
+@routes.route('/logout', methods=['POST'])
+@token_required
+def logout(current_user):
+    # Invalidate the token (this is a simple example; in a real app, you might want to store invalidated tokens)
+    return jsonify({'message': 'Logged out successfully'}), 200
