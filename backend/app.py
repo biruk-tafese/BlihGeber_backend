@@ -2,6 +2,7 @@ import flask
 from flask import request, jsonify
 import joblib
 import pandas as pd
+import backend.app.db as db
 # Load model and expected feature columns
 model = joblib.load('../notebook/Random_Forest_model.pkl')
 expected_columns = joblib.load('../notebook/model_features.pkl')
@@ -13,6 +14,12 @@ crops = sorted([col[len(crop_prefix):] for col in expected_columns if col.starts
 areas = sorted([col[len(area_prefix):] for col in expected_columns if col.startswith(area_prefix)])
 
 app = flask.Flask(__name__)
+# MySQL config
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://root:mysql@localhost:3306/crop'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize db with app
+db.init_app(app)
 
 @app.route('/crop')
 def get_crops():
@@ -22,7 +29,7 @@ def get_areas():
     return jsonify(areas)
 @app.route('/')
 def index():
-    return "Welcome to the Crop Yield Prediction API! Use /predict to make predictions."
+    return jsonify("Welcome to the Crop Yield Prediction API! Use /predict to make predictions.")
 
 @app.route('/predict', methods=['POST'])
 def predict():
