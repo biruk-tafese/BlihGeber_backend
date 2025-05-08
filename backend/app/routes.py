@@ -13,8 +13,12 @@ import os
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from flask import request
-
-
+from matplotlib.backends.backend_pdf import PdfPages
+from fpdf import FPDF
+import pandas as pd
+from io import BytesIO
+from flask import send_file
+from datetime import datetime
 
 # from .__init__ import create_app
 # app = create_app()
@@ -127,6 +131,7 @@ def login_user():
     return jsonify({'message': 'Login successful', 'token': token, 'user_type': user.user_type}), 200
 
 @routes.route('/crop')
+@token_required
 def get_crops():
     return jsonify(crops)
 @routes.route('/area')
@@ -137,6 +142,7 @@ def index():
     return jsonify("Welcome to the Crop Yield Prediction API! Use /predict to make predictions.")
 
 @routes.route('/predict', methods=['POST'])
+@token_required
 def predict():
     data = request.json
 
@@ -169,6 +175,113 @@ def predict():
     # Make prediction
     prediction = model.predict(input_df)
     return jsonify({'predicted_yield': prediction[0]})
+
+
+@routes.route('/predict/download-result-pdf/', methods=['POST'])
+# @token_required
+def predict_download_result():
+    data = request.json
+
+    avg_rain = data.get('average_rain_fall_mm_per_year', 0.0)
+    pesticides = data.get('pesticides_tonnes', 0.0)
+    avg_temp = data.get('avg_temp', 0.0)
+    selected_crop = data.get('crop', '')
+    selected_area = data.get('area', '')
+
+    input_data = {
+        'average_rain_fall_mm_per_year': [avg_rain],
+        'pesticides_tonnes': [pesticides],
+        'avg_temp': [avg_temp],
+    }
+
+    for crop in crops:
+        input_data[f'Item_{crop}'] = [1 if crop == selected_crop else 0]
+    for area in areas:
+        input_data[f'Area_{area}'] = [1 if area == selected_area else 0]
+
+    input_df = pd.DataFrame(input_data)
+    input_df = input_df.reindex(columns=expected_columns, fill_value=0)
+
+    prediction = model.predict(input_df)[0]
+
+    # Create PDF with improved styling
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Add custom fonts and colors
+    primary_color = (0, 102, 204)  # Blue
+    accent_color = (76, 175, 80)   # Green
+    text_color = (51, 51, 51)      # Dark gray
+    
+    # Header Section
+    pdf.set_fill_color(*primary_color)
+    pdf.rect(0, 0, 210, 40, style='F')
+    pdf.set_font("Arial", 'B', 24)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_xy(10, 12)
+    pdf.cell(0, 10, "Crop Yield Prediction Report", 0, 1)
+    
+    # Subheader
+    pdf.set_font("Arial", 'I', 12)
+    pdf.set_xy(10, 25)
+    pdf.cell(0, 10, "Smart Agricultural Analysis Report", 0, 1)
+    
+    # Reset text color
+    pdf.set_text_color(*text_color)
+    
+    # User Input Section
+    pdf.set_font("Arial", 'B', 14)
+    pdf.set_y(45)
+    pdf.cell(0, 10, "Input Parameters", 0, 1)
+    pdf.set_line_width(0.5)
+    pdf.set_draw_color(*primary_color)
+    pdf.line(10, 55, 200, 55)
+    
+    # Input Parameters Table
+    pdf.set_font("Arial", size=12)
+    data = [
+        ("Crop Selected", selected_crop),
+        ("Area", selected_area),
+        ("Average Rainfall (mm/yr)", f"{avg_rain:.2f}"),
+        ("Pesticides (tonnes)", f"{pesticides:.2f}"),
+        ("Average Temperature (°C)", f"{avg_temp:.2f}")
+    ]
+    
+    y_position = 60
+    for label, value in data:
+        pdf.set_xy(15, y_position)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(50, 8, label)
+        pdf.set_xy(65, y_position)
+        pdf.set_font("Arial", '', 12)
+        pdf.cell(0, 8, str(value))
+        y_position += 8
+    
+    # Prediction Result Section
+    pdf.set_font("Arial", 'B', 14)
+    pdf.set_y(y_position + 10)
+    pdf.cell(0, 10, "Prediction Result", 0, 1)
+    pdf.line(10, y_position + 20, 200, y_position + 20)
+    
+    # Highlighted Prediction
+    pdf.set_xy(10, y_position + 25)
+    pdf.set_fill_color(*accent_color)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 12, f" Predicted Yield: {prediction:.2f} tons/hectare ", 0, 1, fill=True)
+    
+    # Additional Information
+    pdf.set_text_color(*text_color)
+    pdf.set_font("Arial", 'I', 10)
+    pdf.set_y(260)
+    pdf.cell(0, 10, f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 0, 0, 'C')
+    
+    # Create PDF in-memory
+    pdf_output = BytesIO()
+    pdf_output.write(pdf.output(dest='S').encode('latin-1'))
+    pdf_output.seek(0)
+
+    return send_file(pdf_output, as_attachment=True, download_name="crop_prediction_report.pdf", mimetype='application/pdf')
 
 @routes.route('/profile', methods=['GET'])
 @token_required
