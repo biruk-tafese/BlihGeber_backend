@@ -268,3 +268,19 @@ def update_user(current_user, user_id):
     db.session.commit()
 
     return jsonify({'message': 'User updated successfully', 'user': user.to_dict()}), 200   
+
+@routes.route('/admin/delete-user/<int:user_id>', methods=['DELETE'])
+@token_required
+def delete_user(current_user, user_id):
+    if current_user.user_type != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    db.session.delete(user)
+    db.session.commit()
+
+    return jsonify({'message': 'User deleted successfully'}), 200   
+
