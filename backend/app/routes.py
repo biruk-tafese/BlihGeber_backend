@@ -15,6 +15,7 @@ from functools import wraps
 from flask import request
 
 
+
 # from .__init__ import create_app
 # app = create_app()
 
@@ -33,6 +34,7 @@ areas = sorted([col[len(area_prefix):] for col in expected_columns if col.starts
 
 
 routes = Blueprint('routes', __name__)
+
 
 """
 Decorator function to enforce JWT token authentication for protected routes.
@@ -215,3 +217,31 @@ def password_update(current_user):
 def logout(current_user):
     # Invalidate the token (this is a simple example; in a real app, you might want to store invalidated tokens)
     return jsonify({'message': 'Logged out successfully'}), 200
+
+
+@routes.route('/admin/create-user', methods=['POST'])
+@token_required
+def create_user(current_user):
+    if current_user.user_type != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    data = request.get_json()
+
+    if not all(k in data for k in ('phone_number', 'full_name', 'password', 'user_type')):
+        return jsonify({'error': 'Missing fields'}), 400
+
+    if User.query.filter_by(phone_number=data['phone_number']).first():
+        return jsonify({'error': 'This Account already exists'}), 409
+
+    hashed_password = bcrypt.hashpw(data['password'].encode('utf-8'), bcrypt.gensalt())
+
+    new_user = User(
+        full_name=data['full_name'],
+        phone_number=data['phone_number'],
+        password=hashed_password.decode('utf-8'),
+        user_type=data['user_type']
+    )
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({'message': 'User created successfully'}), 201
