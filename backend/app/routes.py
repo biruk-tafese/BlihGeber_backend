@@ -19,6 +19,9 @@ import pandas as pd
 from io import BytesIO
 from flask import send_file
 from datetime import datetime
+import csv
+from openpyxl import Workbook
+import io
 
 # from .__init__ import create_app
 # app = create_app()
@@ -38,7 +41,47 @@ areas = sorted([col[len(area_prefix):] for col in expected_columns if col.starts
 
 
 routes = Blueprint('routes', __name__)
+def process_prediction_data(request):
+    """Common data processing for all formats"""
+    data = request.json
+    
+    # Extract and process data (same as before)
+    avg_rain = data.get('average_rain_fall_mm_per_year', 0.0)
+    pesticides = data.get('pesticides_tonnes', 0.0)
+    avg_temp = data.get('avg_temp', 0.0)
+    selected_crop = data.get('crop', '')
+    selected_area = data.get('area', '')
 
+
+    # Build input dict
+    input_data = {
+        'average_rain_fall_mm_per_year': [avg_rain],
+        'pesticides_tonnes': [pesticides],
+        'avg_temp': [avg_temp],
+    }
+
+    # One-hot encode crop and area
+    for crop in crops:
+        input_data[f'Item_{crop}'] = [1 if crop == selected_crop else 0]
+    for area in areas:
+        input_data[f'Area_{area}'] = [1 if area == selected_area else 0]
+
+    # Convert to DataFrame
+    input_df = pd.DataFrame(input_data)
+
+    # Reindex to match expected columns (fill missing with 0)
+    input_df = input_df.reindex(columns=expected_columns, fill_value=0)
+    
+    # Return formatted data
+    return {
+        'Crop': selected_crop,
+        'Area': selected_area,
+        'Average Rainfall (mm/yr)': avg_rain,
+        'Pesticides (tonnes)': pesticides,
+        'Average Temperature (°C)': avg_temp,
+        'Predicted Yield (tons/hectare)':input_df,
+        'Generated At': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
 
 """
 Decorator function to enforce JWT token authentication for protected routes.
@@ -283,6 +326,70 @@ def predict_download_result():
 
     return send_file(pdf_output, as_attachment=True, download_name="crop_prediction_report.pdf", mimetype='application/pdf')
 
+@routes.route('/predict/download-result-csv/', methods=['POST'])
+def download_csv():
+    report_data = process_prediction_data(request)
+
+    csv_output = io.BytesIO()
+    text_stream = io.TextIOWrapper(csv_output, encoding='utf-8', newline='')
+
+    csv_writer = csv.writer(text_stream)
+
+    # Write header and data rows
+    csv_writer.writerow(['Parameter', 'Value'])
+    for key, value in report_data.items():
+        csv_writer.writerow([key, value])
+
+    # Flush and detach the text stream (important!)
+    text_stream.flush()
+    text_stream.detach()
+
+    # Move pointer to start
+    csv_output.seek(0)
+
+    return send_file(
+        csv_output,
+        as_attachment=True,
+        download_name=f"Crop_Prediction_{datetime.now().strftime('%Y%m%d')}.csv",
+        mimetype='text/csv'
+    )
+
+@routes.route('/predict/download-result-excel/', methods=['POST'])
+def download_excel():
+    report_data = process_prediction_data(request)  # This must return a mix of scalars and a DataFrame
+
+    excel_output = BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Crop Prediction Report"
+
+    # Header
+    ws.append(['Parameter', 'Value'])
+
+    # Write simple key-value pairs
+    for key, value in report_data.items():
+        if isinstance(value, pd.DataFrame):
+            # Flatten DataFrame row to individual key-value lines
+            row_dict = value.iloc[0].to_dict()
+            for sub_key, sub_value in row_dict.items():
+                ws.append([sub_key, sub_value])
+        else:
+            ws.append([key, value])
+
+    # Style columns
+    for col in ['A', 'B']:
+        ws.column_dimensions[col].width = 35
+
+    wb.save(excel_output)
+    excel_output.seek(0)
+
+    return send_file(
+        excel_output,
+        as_attachment=True,
+        download_name=f"Crop_Prediction_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    
 @routes.route('/profile', methods=['GET'])
 @token_required
 def profile(current_user):
