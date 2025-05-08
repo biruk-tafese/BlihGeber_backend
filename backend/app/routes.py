@@ -245,3 +245,26 @@ def create_user(current_user):
     db.session.commit()
 
     return jsonify({'message': 'User created successfully'}), 201
+
+@routes.route('/admin/update-user/<int:user_id>', methods=['PUT'])
+@token_required
+def update_user(current_user, user_id):
+    if current_user.user_type != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    data = request.get_json()
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    if 'full_name' in data:
+        user.full_name = data['full_name']
+
+    if 'phone_number' in data:
+        user.phone_number = data['phone_number']
+
+
+    db.session.commit()
+
+    return jsonify({'message': 'User updated successfully', 'user': user.to_dict()}), 200   
