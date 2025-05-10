@@ -168,17 +168,18 @@ def login_user():
     # Generate JWT token
     token = jwt.encode({
         'user_id': user.id,
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=2)  # Token expires in 2 hours
+        # 'exp': datetime.now() + datetime.timedelta(hours=2)  # Token expires in 2 hours
     }, 'AAiT CropYieldPrediction Project', algorithm='HS256')
 
     return jsonify({'message': 'Login successful', 'token': token, 'user_type': user.user_type}), 200
 
-@routes.route('/crop')
+@routes.route('/crop', methods=['GET'])
 @token_required
-def get_crops():
+def get_crops(current_user):
     return jsonify(crops)
-@routes.route('/area')
-def get_areas():
+@routes.route('/area', methods=['GET'])
+@token_required
+def get_areas(current_user):
     return jsonify(areas)
 @routes.route('/')
 def index():
